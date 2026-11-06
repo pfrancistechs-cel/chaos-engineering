@@ -1,0 +1,71 @@
+name: chaos
+
+# A tiny shop with a gateway, two replicas and a dependency, plus the tools to break it on purpose.
+#   you -> gateway :8080 -> shop1 / shop2 -> chaosproxy (fault injection) -> inventory
+# The chaos console (:8081) shows what users experience while experiments run.
+x-python: &python
+  build: ./demo
+  image: chaos-demo:local
+  restart: unless-stopped
+
+services:
+  inventory:
+    <<: *python
+    container_name: chaos-inventory
+    command: ["python", "/app/inventory.py"]
+
+  chaosproxy:
+    <<: *python
+    container_name: chaos-proxy
+    command: ["python", "/app/chaosproxy.py"]
+    environment:
+      UPSTREAM: http://inventory:8000
+    ports:
+      - "127.0.0.1:9002:9002"           # fault control, for the scripts on this instance only
+    depends_on: [inventory]
+
+  shop1:
+    <<: *python
+    container_name: chaos-shop1
+    command: ["python", "/app/shop.py"]
+    environment: {SHOP_NAME: shop1}
+    volumes: ["./config:/config:ro"]
+    depends_on: [chaosproxy]
+    networks:
+      default: {ipv4_address: 172.29.0.11}
+
+  shop2:
+    <<: *python
+    container_name: chaos-shop2
+    command: ["python", "/app/shop.py"]
+    environment: {SHOP_NAME: shop2}
+    volumes: ["./config:/config:ro"]
+    depends_on: [chaosproxy]
+    networks:
+      default: {ipv4_address: 172.29.0.12}
+
+  gateway:
+    image: ${NGINX_IMAGE:-nginx:1.27-alpine}
+    container_name: chaos-gateway
+    restart: unless-stopped
+    volumes: ["./gateway/default.conf:/etc/nginx/conf.d/default.conf:ro"]
+    ports: ["8080:80"]
+    depends_on: [shop1, shop2]
+
+  console:
+    <<: *python
+    container_name: chaos-console
+    command: ["python", "/app/console.py"]
+    environment:
+      GATEWAY_URL: http://gateway
+    volumes:
+      - ./config:/config:ro
+      - ./results:/results:ro
+    ports: ["8081:8081"]
+    depends_on: [gateway]
+
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: 172.29.0.0/24

@@ -1,0 +1,9 @@
+.env
+__pycache__/
+*.pyc
+.venv/
+*.pem
+.DS_Store
+# written at run time
+config/mode
+results/*.json
